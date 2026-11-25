@@ -1,0 +1,49 @@
+name: MCX Option Fair-Value Buy Alerts
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'test checks Upstox+Telegram; demo runs offline Crude 7500 simulation; run monitors live MCX'
+        type: choice
+        options: [test, demo, once, run]
+        default: test
+  schedule:
+    # MCX runs 09:00 - 23:30/23:55 IST (Mon-Fri). Split into 3 <5.5h shifts to fit GitHub Actions 6h cap:
+    # 08:55 IST (03:25 UTC), 14:10 IST (08:40 UTC), 19:20 IST (13:50 UTC)
+    - cron: '25 3 * * 1-5'
+    - cron: '40 8 * * 1-5'
+    - cron: '50 13 * * 1-5'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcx-option-fair-value
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    env:
+      MCX_SYMBOLS: ${{ vars.MCX_SYMBOLS || 'ALL' }}
+      ROLLOVER_DTE: ${{ vars.ROLLOVER_DTE || '5' }}
+      MIN_GAP_PCT: ${{ vars.MIN_GAP_PCT || '5.0' }}
+      POLL_SECONDS: '30'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Run MCX Fair-Value Scanner
+        env:
+          UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_MODE: ${{ inputs.mode || 'run' }}
+        run: python -u mcx_option_bot.py --mode "$RUN_MODE"
